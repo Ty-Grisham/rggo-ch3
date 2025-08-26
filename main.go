@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"runtime"
 
 	bluemonday "github.com/microcosm-cc/bluemonday"
 	"github.com/russross/blackfriday/v2"
@@ -29,6 +31,7 @@ const (
 func main() {
 	// Parse flags
 	filename := flag.String("file", "", "Markdown file to preview")
+	skipPreview := flag.Bool("s", false, "Skip auto-preview")
 	flag.Parse()
 
 	// If user did not provide input, show usage
@@ -36,14 +39,14 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-	if err := run(*filename, os.Stdout); err != nil {
+	if err := run(*filename, os.Stdout, *skipPreview); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 // run coordinates the execution of multiple functions
-func run(filename string, out io.Writer) error {
+func run(filename string, out io.Writer, skipPreview bool) error {
 	// Read all data from the input file and check for errors
 	input, err := os.ReadFile(filename)
 	if err != nil {
@@ -65,7 +68,15 @@ func run(filename string, out io.Writer) error {
 
 	fmt.Fprintln(out, outName)
 
-	return saveHTML(outName, htmlData)
+	if err := saveHTML(outName, htmlData); err != nil {
+		return err
+	}
+
+	if skipPreview {
+		return nil
+	}
+
+	return preview(outName)
 }
 
 // parseContent recieves a slice of bytes representing the content of a Markdown
@@ -92,4 +103,36 @@ func parseContent(input []byte) []byte {
 func saveHTML(outName string, data []byte) error {
 	// Write the bytes to the file
 	return os.WriteFile(outName, data, 0644)
+}
+
+// preview automatically opens an HTML file. preview takes the
+// temporary file name as input and returns an error in case it can
+// not open the file
+func preview(fname string) error {
+	cName := ""
+	cParams := []string{}
+
+	// Define executeable based on OS
+	switch runtime.GOOS {
+	case "linux":
+		cName = "xdg-open"
+	case "windows":
+		cName = "cmd.exe"
+	case "darwin":
+		cName = "open"
+	default:
+		return fmt.Errorf("os not supported")
+	}
+
+	// Append file name to parameters slice
+	cParams = append(cParams, fname)
+
+	// Locate executable in PATH
+	cPath, err := exec.LookPath(cName)
+	if err != nil {
+		return err
+	}
+
+	// Open the file using default programs
+	return exec.Command(cPath, cParams...).Run()
 }
